@@ -27,10 +27,10 @@ english_movies_genre<-english_movies_genre |> select(-Genre)
 english_movies_genre<-english_movies_genre |> select(-row)
 english_movies_genre$`Movie Name`<-gsub("\\(.*", "", english_movies_genre$`Movie Name`)
 english_movies_genre$Plot<-paste(english_movies_genre$`Movie Name`,english_movies_genre$Plot,sep = " : ")
-write_csv(english_movies_genre,"movie_plots.csv")
+write_csv(english_movies_genre,"movie_plots1.csv")
 
 
 #Replicating this with Genres as an 'answer key'
 english_movies_with_genres$`Movie Name`<-gsub("\\(.*", "", english_movies_with_genres$`Movie Name`)
 english_movies_with_genres$Plot<-paste(english_movies_with_genres$`Movie Name`,english_movies_with_genres$Plot,sep = " : ")
-write_csv(english_movies_with_genres,"movie_plots_with_genres.csv")
+write_csv(english_movies_with_genres,"movie_plots_with_genres1.csv")

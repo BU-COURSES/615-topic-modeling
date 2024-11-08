@@ -1,0 +1,121 @@
+---
+title: "Movie Plot Topic Modeling Report"
+author: "Taha Ababou"
+format: html
+---
+
+**!!! This file is for experimentation purposes. Please ignore. !!!**
+
+
+```{r setup, include=FALSE}
+# Load necessary libraries
+library(tidyverse)
+library(tidytext)
+library(topicmodels)
+library(ldatuning)
+library(ggplot2)
+library(wordcloud2)
+library(tm)
+
+```
+
+```{r}
+# Load the data
+data <- read.csv("data/movie_plots_with_genres.csv")
+```
+
+```{r}
+# Preprocessing: Tokenize, remove stop words, and prepare Document-Term Matrix
+data_clean <- data %>%
+  unnest_tokens(word, Plot) %>%
+  anti_join(stop_words) %>%
+  count(Movie.Name, word, sort = TRUE) %>%
+  cast_dtm(Movie.Name, word, n)
+
+```
+
+```{r}
+# Use ldatuning to find optimal number of topics
+result <- FindTopicsNumber(
+  data_clean,
+  topics = seq(2, 10, by = 1),  # Smaller topic range
+  metrics = c("Deveaud2014"),   # Use one metric to speed up
+  method = "Gibbs",
+  control = list(seed = 1234),
+  mc.cores = parallel::detectCores(),
+  verbose = TRUE
+)
+
+```
+
+```{r}
+# Plot Scree Plot for selecting optimal k
+FindTopicsNumber_plot(result)
+
+```
+
+```{r}
+# Fit LDA Model with the optimal number of topics (modify k based on scree plot results)
+optimal_k <- 5  # Replace with the chosen number of topics from scree plot
+lda_model <- LDA(data_clean, k = optimal_k, control = list(seed = 1234))
+
+# View terms per topic
+topics <- tidy(lda_model, matrix = "beta")
+
+# Plot Beta Values (Top Terms per Topic)
+top_terms <- topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ggplot(top_terms, aes(x = reorder_within(term, beta, topic), y = beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered() +
+  labs(title = "Top Terms per Topic", y = "Beta")
+
+# Gamma Plot: Topic Distribution across Documents
+gamma <- tidy(lda_model, matrix = "gamma")
+
+ggplot(gamma, aes(x = document, y = gamma, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  labs(title = "Document-Topic Distributions (Gamma)")
+```
+
+```{r}
+# Generate Word Cloud for Topics
+set.seed(123)
+# Loop to generate word clouds for each topic
+for (i in 1:optimal_k) {
+  # Filter the top terms for each topic and ensure frequency is numeric
+  topic_terms <- top_terms %>%
+    filter(topic == i) %>%
+    select(term, beta) %>%
+    rename(freq = beta) %>%
+    mutate(freq = as.numeric(freq))  # Ensure freq is numeric
+
+  # Generate the word cloud
+  wordcloud2(data = topic_terms, size = 0.7, shape = 'circle')
+}
+
+# Clustering Visualization: Use MDS for 2D Representation of Topics
+lda_model_mds <- posterior(lda_model)$topics %>%
+  dist() %>%
+  cmdscale(k = 2) %>%
+  as.data.frame()
+colnames(lda_model_mds) <- c("Dim1", "Dim2")
+
+# Add topic assignments for coloring (assuming optimal_k represents the number of topics)
+lda_model_mds$topic <- apply(posterior(lda_model)$topics, 1, which.max)
+
+# Plot with correct color mapping
+ggplot(lda_model_mds, aes(x = Dim1, y = Dim2, color = as.factor(topic))) +
+  geom_point() +
+  labs(title = "Topic Clustering Visualization", x = "Dimension 1", y = "Dimension 2", color = "Topic")
+```
+
+
+
+
