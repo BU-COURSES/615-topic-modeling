@@ -1,0 +1,185 @@
+---
+title: "Topic Modeling on Movie Plots with Genre Data"
+author: "Taha Ababou"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: cerulean
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(readr)
+library(tm)
+library(topicmodels)
+library(ldatuning)
+library(wordcloud)
+library(ggplot2)
+library(tidytext)
+library(factoextra)
+```
+
+## Introduction - Data Cleaning and Preparation
+
+```{r}
+# Load the movie plots with genres dataset
+movie_data <- read_csv("data/movie_plots_with_genres.csv")
+
+# Inspect structure and content
+str(movie_data)
+```
+
+## Data Cleaning and Preprocessing
+
+1.  Text Standardization: Clean text by lowercasing, removing special characters, and stripping whitespace.
+2.  Tokenization and Stop Word Removal: Break down each plot into individual words, filter out common stop words, and remove unnecessary words (like common names).
+
+```{r}
+# Clean and preprocess the plot text
+movie_data <- movie_data %>%
+  mutate(Plot = str_to_lower(Plot)) %>%  # Convert text to lowercase
+  unnest_tokens(word, Plot) %>%  # Tokenize text by words
+  anti_join(stop_words, by = "word")  # Remove stop words
+```
+
+## Creating a Document-Term Matrix (DTM)
+
+Construct the Document-Term Matrix (DTM) using only the cleaned words for each movie. This matrix is used for the LDA modeling.
+
+```{r}
+# Create a Document-Term Matrix (DTM) for LDA
+dtm <- movie_data %>%
+  count(`Movie Name`, word) %>%
+  cast_dtm(document = `Movie Name`, term = word, value = n)
+```
+
+## Optimal Topic Selection Using Scree Plot
+
+Using perplexity and other metrics, we determine the ideal number of topics for the LDA model with a scree plot.
+
+```{r}
+# Determine the optimal number of topics (k) using ldatuning
+results <- FindTopicsNumber(
+  dtm, 
+  topics = seq(1, 20, by = 1),
+  metrics = c("Griffiths2004", "CaoJuan2009", "Arun2010", "Deveaud2014"), 
+  method = "Gibbs",
+  control = list(seed = 1234)
+)
+
+FindTopicsNumber_plot(results)
+```
+
+## Building the LDA Model
+
+After selecting the optimal **K** (e.g., 15), we fit the LDA model and extract topic-term and document-topic distributions.
+
+```{r}
+# Fit LDA model with optimal number of topics
+optimal_k <- 7
+lda_model <- LDA(dtm, k = optimal_k, method = "Gibbs", control = list(seed = 1234))
+
+# Extract topic-term (beta) and document-topic (gamma) matrices
+topic_terms <- tidy(lda_model, matrix = "beta")
+document_topics <- tidy(lda_model, matrix = "gamma")
+```
+
+## Integrating Genres for Enhanced Topic Interpretation
+
+### Genre Analysis by Topic
+
+Aggregate the gamma values (document-topic distribution) by genre to see which topics are more common within each genre.
+
+```{r}
+# Join genre data with document-topic matrix
+movie_genre_topics <- document_topics %>%
+  left_join(movie_data %>% select(`Movie Name`, Genre), by = c("document" = "Movie Name"))
+
+# Aggregate by genre and calculate average gamma per topic
+genre_topic_distribution <- movie_genre_topics %>%
+  group_by(Genre, topic) %>%
+  summarize(avg_gamma = mean(gamma, na.rm = TRUE))
+
+# Visualize topic prevalence by genre
+ggplot(genre_topic_distribution, aes(x = factor(topic), y = avg_gamma, fill = Genre)) +
+  geom_col(position = "dodge") +
+  labs(title = "Average Topic Distribution by Genre",
+       x = "Topic", y = "Average Gamma") +
+  theme_minimal()
+```
+
+### Top Terms per Topic with Genre Context
+
+Examine the top terms for each topic and consider how they align with genres to assist in naming the topics.
+
+```{r}
+# Visualize top terms per topic
+top_terms <- topic_terms %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ggplot(top_terms, aes(reorder(term, beta), beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  labs(title = "Top Terms in Each Topic",
+       x = NULL, y = "Beta") +
+  theme_minimal()
+
+```
+
+## Clustering Movies by Topic with Genre Information
+
+### K-means Clustering
+
+Apply k-means clustering on the gamma values, incorporating genre information to help interpret clusters.
+
+```{r}
+# Reshape gamma matrix for clustering
+gamma_wide <- document_topics %>%
+  pivot_wider(names_from = topic, values_from = gamma) %>%
+  drop_na()
+
+# Apply k-means clustering with 5 clusters (experiment with different values)
+set.seed(1234)
+clusters <- kmeans(gamma_wide %>% select(-document), centers = 5)
+gamma_wide$cluster <- clusters$cluster
+
+# Add genres to clustered data
+clustered_movies <- gamma_wide %>%
+  left_join(movie_data %>% select(`Movie Name`, Genre), by = c("document" = "Movie Name"))
+
+# Visualize clusters
+fviz_cluster(clusters, data = gamma_wide %>% select(-document, -cluster)) +
+  labs(title = "Movie Clusters Based on Topic Distributions and Genre")
+
+```
+
+### Word Clouds by Clustered Topics
+
+Generate word clouds for the top terms in selected clusters to interpret and name clusters with genre context.
+
+```{r}
+# Function to generate word clouds for each cluster
+create_wordcloud <- function(cluster_number) {
+  terms <- topic_terms %>%
+    filter(topic == cluster_number) %>%
+    arrange(desc(beta)) %>%
+    top_n(20, beta)
+  
+  wordcloud(words = terms$term, freq = terms$beta, min.freq = 0.01,
+            max.words = 20, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
+}
+
+# Display word clouds for selected topics
+par(mfrow = c(2, 2))
+for (i in c(1, 5, 10, 15)) {
+  create_wordcloud(i)
+}
+```

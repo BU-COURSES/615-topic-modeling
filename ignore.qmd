@@ -1,0 +1,85 @@
+---
+title: "Topic Modeling Report"
+author: "Taha Ababou"
+date: "2024-11-07"
+format: 
+  pdf:
+    toc: true  # Enable the table of contents
+    toc_depth: 3
+    include-in-header: 
+       text: |
+         \usepackage{fvextra}
+         \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+         \DefineVerbatimEnvironment{OutputCode}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#| label: initialize-libraries
+#| warning: false
+#| message: false
+
+# Loading necessary libraries for data cleaning and preparation
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(readr)
+library(tm)
+library(topicmodels)
+library(ldatuning)
+library(wordcloud)
+library(textcat)
+library(stringr)
+library(ggplot2)
+```
+
+# Introduction - Data Cleaning and Preparation
+
+```{r echo=FALSE}
+# Importing the movie plot datasets
+movie_plots <- read_csv("data/movie_plots.csv")
+movie_plots_with_genres <- read_csv("data/movie_plots_with_genres.csv")
+
+# Examining the structure of the datasets
+#str(movie_plots)
+#str(movie_plots_with_genres)
+
+```
+
+# Data Cleaning and Preprocessing
+
+```{r}
+# Combine datasets if necessary and clean text data
+movie_plots <- movie_plots %>%
+  mutate(Plot = str_to_lower(Plot), # Convert to lowercase
+         Plot = str_remove_all(Plot, "[^a-z\\s]")) # Remove special characters
+
+# Create a corpus and a Document-Term Matrix (DTM)
+corpus <- Corpus(VectorSource(movie_plots$Plot))
+dtm <- DocumentTermMatrix(corpus, control = list(
+  stopwords = TRUE, 
+  removePunctuation = TRUE,
+  removeNumbers = TRUE, 
+  wordLengths = c(3, Inf)
+))
+```
+
+# Choosing the Number of Topics (K) with Scree Plot
+
+```{r}
+# Find the optimal number of topics using ldatuning package
+result <- FindTopicsNumber(dtm,
+                           topics = seq(2, 20, by = 1),
+                           metrics = c("CaoJuan2009", "Arun2010", "Griffiths2004", "Deveaud2014"),
+                           method = "Gibbs",
+                           control = list(seed = 1234),
+                           mc.cores = 2L,
+                           verbose = TRUE)
+
+FindTopicsNumber_plot(result)
+```
+
+
+
+
+
